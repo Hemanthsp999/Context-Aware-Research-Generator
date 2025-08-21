@@ -2,13 +2,15 @@ from fastapi import FastAPI
 from sqlalchemy.orm import Session
 from fastapi import HTTPException, Depends
 from passlib.hash import bcrypt
-from database import SessionLocal, User
+from datetime import datetime
+from database import SessionLocal, User, Base, engine, Conversation, ResearchHistory
 from schemas import ResearchRequest, ResearchResponse, LoginModel, SigninRequestModel, SigninResponseModel, LoginResponseModel
-from memory import get_history
+# from memory import get_history
 from pipeline import run_research_pipeline
 from dotenv import load_dotenv
+import json
 import os
-
+Base.metadata.create_all(bind=engine)
 
 load_dotenv()
 
@@ -25,25 +27,85 @@ def get_db():
         db.close()
 
 
-@app.post("/research", response_model=ResearchResponse)
-def generate_research(request: ResearchRequest):
+@app.post("/{user_id}/research/", response_model=ResearchResponse)
+def generate_research(user_id: int, request: ResearchRequest, db: Session = Depends(get_db)):
     try:
+        # ✅ ensure user exists
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # ✅ get or create conversation
+        conversation = db.query(Conversation).filter(
+            Conversation.conversation_id == request.conversation_id,
+            Conversation.user_id == user.id
+        ).first()
+
+        if not conversation:
+            conversation = Conversation(
+                conversation_id=request.conversation_id or f"conv_{datetime.utcnow().timestamp()}",
+                user_id=user.id
+            )
+            db.add(conversation)
+            db.commit()
+            db.refresh(conversation)
+
+        # ✅ run pipeline
         brief = run_research_pipeline(request)
+
+        # ✅ save into ResearchHistory
+        new_history = ResearchHistory(
+            topic=brief.topic,
+            summary=brief.summary,
+            sources=json.dumps([e.model_dump() for e in brief.references]),
+            conversation_id=conversation.id
+        )
+        db.add(new_history)
+        db.commit()
+
         return brief.model_dump()
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.get("/research/history/{conversation_id}")
-def get_conversation_history(conversation_id: str):
-    """Get all research briefs for a conversation"""
+@app.get("/{user_id}/{conversation_id}/history")
+def get_conversation_history(user_id: int, conversation_id: str, db: Session = Depends(get_db)):
+    """Get all research briefs for a user's conversation"""
     try:
-        history = get_history(conversation_id)
+        # ✅ verify user
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            raise HTTPException(status_code=404, detail="User not found")
+
+        # ✅ get conversation
+        conversation = db.query(Conversation).filter(
+            Conversation.conversation_id == conversation_id,
+            Conversation.user_id == user.id
+        ).first()
+        if not conversation:
+            raise HTTPException(status_code=404, detail="Conversation not found for this user")
+
+        # ✅ get history
+        history = db.query(ResearchHistory).filter(
+            ResearchHistory.conversation_id == conversation.id
+        ).all()
+
         return {
+            "user_id": user_id,
             "conversation_id": conversation_id,
             "brief_count": len(history),
-            "briefs": [brief.model_dump() for brief in history]
+            "briefs": [
+                {
+                    "topic": h.topic,
+                    "summary": h.summary,
+                    "sources": json.loads(h.sources) if h.sources else [],
+                    "created_at": h.created_at
+                }
+                for h in history
+            ]
         }
+
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error retrieving history: {str(e)}")
 

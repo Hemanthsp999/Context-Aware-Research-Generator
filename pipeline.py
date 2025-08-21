@@ -13,6 +13,7 @@ def run_research_pipeline(req: ResearchRequest) -> ResearchResponse:
         "topic": req.topic,
         "follow_up": req.follow_up,
         "conversation_id": req.conversation_id,
+        "user_id": req.user_id,  # add this only if you have it
         "prior_context": None,
         "docs": [],
         "brief": None,

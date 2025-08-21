@@ -7,6 +7,7 @@ class UserQuery(BaseModel):
     topic: constr(min_length=3)
     follow_up: bool = False
     conversation_id: Optional[str] = None  # lets API/CLI thread context
+    user_id: Optional[str] = None
 
 
 class Evidence(BaseModel):

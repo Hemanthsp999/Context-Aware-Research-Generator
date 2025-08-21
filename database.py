@@ -1,21 +1,20 @@
-from sqlalchemy import create_engine, Column, Integer, String, Text, DateTime
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy import Column, Integer, String, ForeignKey, Text, DateTime
+from sqlalchemy.orm import relationship
 from datetime import datetime
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker, declarative_base
 
-# SQLite URL format
-DATABASE_URL = "sqlite:///./research_history.db"
+# database connection URL (SQLite here for example)
+DATABASE_URL = "sqlite:///./test.db"
 
 # Create engine
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 
-# SessionLocal class
+# Create SessionLocal class
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base class
+# Base class for models
 Base = declarative_base()
-
-# History table
 
 
 class User(Base):
@@ -27,6 +26,20 @@ class User(Base):
     phone = Column(String(20))
     password = Column(String(80), nullable=False)
 
+    conversations = relationship("Conversation", back_populates="user")
+
+
+class Conversation(Base):
+    __tablename__ = "conversations"
+
+    id = Column(Integer, primary_key=True, index=True)
+    conversation_id = Column(String(100), index=True)  # maps to your old file-based ID
+    user_id = Column(Integer, ForeignKey("user_table.id"))
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    user = relationship("User", back_populates="conversations")
+    history = relationship("ResearchHistory", back_populates="conversation", cascade="all, delete")
+
 
 class ResearchHistory(Base):
     __tablename__ = "research_history"
@@ -37,7 +50,6 @@ class ResearchHistory(Base):
     sources = Column(Text)  # store as JSON string
     created_at = Column(DateTime, default=datetime.utcnow)
 
-
-# Create tables
-Base.metadata.create_all(bind=engine)
+    conversation_id = Column(Integer, ForeignKey("conversations.id"))
+    conversation = relationship("Conversation", back_populates="history")
 
